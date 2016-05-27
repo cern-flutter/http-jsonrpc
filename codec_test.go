@@ -19,7 +19,7 @@ package http_jsonrpc
 import (
 	"github.com/gorilla/mux"
 	gorilla "github.com/gorilla/rpc/v2"
-	"github.com/gorilla/rpc/v2/json"
+	json "github.com/gorilla/rpc/v2/json2"
 	"log"
 	"net/http"
 	"net/rpc"

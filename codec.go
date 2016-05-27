@@ -18,7 +18,7 @@ package http_jsonrpc
 
 import (
 	"bytes"
-	"github.com/gorilla/rpc/v2/json"
+	json "github.com/gorilla/rpc/v2/json2"
 	"net/http"
 	"net/rpc"
 )
