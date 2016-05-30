@@ -33,6 +33,7 @@ type Mock int
 // Echo just echoes the input string on the output parameter
 func (*Mock) Echo(r *http.Request, in *string, out *string) error {
 	*out = *in
+	log.Print("Echo ", *in)
 	return nil
 }
 
@@ -55,7 +56,6 @@ func server() {
 	if err := http.ListenAndServe(addr, router); err != nil {
 		log.Panic(err)
 	}
-	log.Print("Server up")
 }
 
 // init
@@ -73,13 +73,13 @@ func TestCall(t *testing.T) {
 	client := rpc.NewClientWithCodec(codec)
 
 	var request string
-	var reply string
+	var response string
 	request = "Hello there"
-	if err := client.Call("Mock.Echo", &request, &reply); err != nil {
+	if err := client.Call("Mock.Echo", &request, &response); err != nil {
 		t.Fatal(err)
 	}
 
-	if request != reply {
+	if request != response {
 		t.Fatal("Was expecting an echo")
 	}
 }
@@ -94,9 +94,47 @@ func TestBadCall(t *testing.T) {
 	client := rpc.NewClientWithCodec(codec)
 
 	var request string
-	var reply string
+	var response string
 	request = "Hello there"
-	if err := client.Call("Mock.ThisDoesNotExist", &request, &reply); err == nil {
+	if err := client.Call("Mock.ThisDoesNotExist", &request, &response); err == nil {
 		t.Fatal("Was expecting an error")
+	}
+}
+
+// Call twice
+func TestCallMultiple(t *testing.T) {
+	codec, err := NewClientCodec("http://" + addr + "/rpc")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client := rpc.NewClientWithCodec(codec)
+
+	var request string
+	var response string
+
+	request = "Hello there"
+	if err := client.Call("Mock.Echo", &request, &response); err != nil {
+		t.Fatal(err)
+	}
+	if request != response {
+		t.Fatal("Was expecting an echo")
+	}
+
+	var response2 string
+	request = "Bye bye my"
+	if err := client.Call("Mock.Echo", &request, &response2); err != nil {
+		t.Fatal(err)
+	}
+	if request != response2 {
+		t.Fatal("Was expecting an echo")
+	}
+
+	request = "And have a nice weekend"
+	if err := client.Call("Mock.Echo", &request, &response); err != nil {
+		t.Fatal(err)
+	}
+	if request != response {
+		t.Fatal("Was expecting an echo")
 	}
 }

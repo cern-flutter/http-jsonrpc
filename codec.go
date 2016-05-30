@@ -18,31 +18,62 @@ package http_jsonrpc
 
 import (
 	"bytes"
-	json "github.com/gorilla/rpc/v2/json2"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/rpc"
 )
 
-type codec struct {
-	addr         string
-	client       http.Client
-	responses    chan *http.Response
-	lastResponse *http.Response
-}
+var (
+	ErrNullResult = errors.New("Result is nil")
+)
+
+type (
+	clientRequest struct {
+		Version string      `json:"jsonrpc"`
+		Method  string      `json:"method"`
+		Params  interface{} `json:"params"`
+		Id      uint64      `json:"id"`
+	}
+
+	clientResponse struct {
+		Version string           `json:"jsonrpc"`
+		Result  *json.RawMessage `json:"result"`
+		Error   *json.RawMessage `json:"error"`
+		Id      uint64           `json:"id"`
+	}
+
+	clientError struct {
+		Code    int         `json:"code"`
+		Message string      `json:"message"`
+		Data    interface{} `json:"data"`
+	}
+
+	codec struct {
+		addr               string
+		httpResponses      chan *http.Response
+		lastClientResponse *clientResponse
+	}
+)
 
 // New creates a new jsonrpc over HTTP client
 func NewClientCodec(addr string) (rpc.ClientCodec, error) {
 	return &codec{
-		addr:         addr,
-		client:       http.Client{},
-		responses:    make(chan *http.Response),
-		lastResponse: nil,
+		addr:               addr,
+		httpResponses:      make(chan *http.Response),
+		lastClientResponse: nil,
 	}, nil
 }
 
 // WriteRequest sends the request to the server
 func (c *codec) WriteRequest(request *rpc.Request, args interface{}) error {
-	jsonEncodedReq, err := json.EncodeClientRequest(request.ServiceMethod, args)
+	req := clientRequest{
+		Version: "2.0",
+		Method:  request.ServiceMethod,
+		Params:  args,
+		Id:      request.Seq,
+	}
+	jsonEncodedReq, err := json.Marshal(req)
 	if err != nil {
 		return err
 	}
@@ -51,31 +82,53 @@ func (c *codec) WriteRequest(request *rpc.Request, args interface{}) error {
 		return err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpResp, err := c.client.Do(httpReq)
+	client := http.Client{}
+	httpResp, err := client.Do(httpReq)
 	if err != nil {
 		return err
 	}
-	c.responses <- httpResp
+	c.httpResponses <- httpResp
 	return nil
 }
 
 // ReadResponseHeader reads the response headers
 func (c *codec) ReadResponseHeader(response *rpc.Response) error {
-	c.lastResponse = <-c.responses
-	if c.lastResponse.StatusCode/100 != 2 {
-		response.Error = c.lastResponse.Status
+	httpResp := <-c.httpResponses
+	defer httpResp.Body.Close()
+
+	if httpResp.StatusCode/100 != 2 {
+		response.Error = httpResp.Status
+		return nil
 	}
+
+	resp := clientResponse{}
+	decoder := json.NewDecoder(httpResp.Body)
+	if err := decoder.Decode(&resp); err != nil {
+		return err
+	}
+	response.Seq = resp.Id
+	if resp.Error != nil {
+		error := clientError{}
+		if err := json.Unmarshal(*resp.Error, &error); err != nil {
+			return err
+		}
+		response.Error = error.Message
+		return nil
+	}
+
+	c.lastClientResponse = &resp
 	return nil
 }
 
 // ReadResponseBody reads the response body
 func (c *codec) ReadResponseBody(reply interface{}) error {
-	defer c.lastResponse.Body.Close()
-	err := json.DecodeClientResponse(c.lastResponse.Body, reply)
-	if err != nil {
-		return err
+	if reply == nil {
+		return nil
 	}
-	return nil
+	if c.lastClientResponse.Result == nil {
+		return ErrNullResult
+	}
+	return json.Unmarshal(*c.lastClientResponse.Result, reply)
 }
 
 // Closes the connection
